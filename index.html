@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Virtual Robot Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #222; color: white; }
+        .container { margin-top: 50px; }
+        img { border: 4px solid #00ffcc; border-radius: 10px; width: 640px; height: 480px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Virtual Robot Interface</h1>
+        <p>Voice command is running active in background...</p>
+        
+        <!-- This tag connects directly with our Flask server route -->
+        <img src="{{ url_for('video_feed') }}" alt="Robot Live Camera View">
+    </div>
+</body>
+</html>
