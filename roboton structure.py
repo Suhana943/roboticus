@@ -4,6 +4,9 @@ import numpy as np
 import pyttsx3
 import speech_recognition as sr
 import threading
+from flask import Flask, render_template, Response
+
+app = Flask(__name__)
 
 # Initialize MediaPipe pose
 mp_pose = mp.solutions.pose
@@ -30,11 +33,10 @@ def is_wearing_red(frame):
     total_pixels = frame.shape[0] * frame.shape[1]
     return (red_pixels / total_pixels) > 0.05
 
-# Function for speech recognition listening
+# Speech recognition thread
 def listen_and_respond():
     recognizer = sr.Recognizer()
     mic = sr.Microphone()
-
     while True:
         with mic as source:
             print("Listening...")
@@ -47,46 +49,55 @@ def listen_and_respond():
                 say("Hello! How can I help you?")
             elif "color" in command:
                 say("Please stand in front of the camera.")
-            elif "exit" in command or "quit" in command:
+            elif "exit" in command:
                 say("Goodbye!")
                 break
-        except sr.UnknownValueError:
-            print("Sorry, I did not understand.")
-        except sr.RequestError:
-            print("Could not request results from speech recognition service.")
+        except Exception:
+            pass
 
-# Start speech recognition in a separate thread so it doesn't block camera processing
 listener_thread = threading.Thread(target=listen_and_respond, daemon=True)
 listener_thread.start()
 
-cap = cv2.VideoCapture(0)
-said_red = False
+# Camera generator for HTML web streaming
+def gen_frames():
+    cap = cv2.VideoCapture(0)
+    said_red = False
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        frame = cv2.flip(frame, 1)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(rgb_frame)
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+        if results.pose_landmarks:
+            mp.solutions.drawing_utils.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-    frame = cv2.flip(frame, 1)
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = pose.process(rgb_frame)
+        if is_wearing_red(frame):
+            if not said_red:
+                # Threading is used here to avoid freezing the camera view while speaking
+                threading.Thread(target=say, args=("Your color is red",), daemon=True).start()
+                said_red = True
+            cv2.putText(frame, "Red color detected!", (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        else:
+            said_red = False
 
-    # Optional: Draw pose landmarks on frame
-    if results.pose_landmarks:
-        mp.solutions.drawing_utils.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+        # Convert image to bytes format for HTML browser rendering
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-    # Check red clothes
-    if is_wearing_red(frame):
-        if not said_red:
-            say("Your color is red")
-            said_red = True
-        cv2.putText(frame, "Red color detected!", (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-    else:
-        said_red = False
+@app.route('/')
+def index():
+    # Looks for index.html inside templates folder
+    return render_template('index.html')
 
-    cv2.imshow("Robot View", frame)
-    if cv2.waitKey(1) & 0xFF == 27:  # ESC to quit
-        break
+@app.route('/video_feed')
+def video_feed():
+    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-cap.release()
-cv2.destroyAllWindows()
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
+            
